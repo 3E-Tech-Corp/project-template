@@ -3,6 +3,10 @@ import { useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Pricing from './pages/Pricing';
+import Account from './pages/Account';
+import PaymentSuccess from './pages/PaymentSuccess';
+import PaymentCancel from './pages/PaymentCancel';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -35,6 +39,11 @@ export default function App() {
         path="/login"
         element={isAuthenticated ? <Navigate to="/" /> : <Login />}
       />
+      {/* Public routes */}
+      <Route path="/pricing" element={<Pricing />} />
+      {/* Auth-required routes */}
+      <Route path="/payment/success" element={<PrivateRoute><PaymentSuccess /></PrivateRoute>} />
+      <Route path="/payment/cancel" element={<PrivateRoute><PaymentCancel /></PrivateRoute>} />
       <Route
         path="/"
         element={
@@ -44,6 +53,7 @@ export default function App() {
         }
       >
         <Route index element={<Dashboard />} />
+        <Route path="account" element={<Account />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>

@@ -71,6 +71,7 @@ builder.Services.AddCors(options =>
 
 // Register services
 builder.Services.AddSingleton<AuthService>();
+builder.Services.AddSingleton<StripeService>();
 
 var app = builder.Build();
 
@@ -97,6 +98,21 @@ using (var scope = app.Services.CreateScope())
                         IsActive BIT NOT NULL DEFAULT 1,
                         CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
                         UpdatedAt DATETIME2 NULL
+                    );
+                END
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Subscriptions')
+                BEGIN
+                    CREATE TABLE Subscriptions (
+                        Id INT IDENTITY(1,1) PRIMARY KEY,
+                        UserId INT NOT NULL,
+                        StripeCustomerId NVARCHAR(100) NOT NULL,
+                        StripeSubscriptionId NVARCHAR(100) NULL,
+                        PlanName NVARCHAR(50) NULL,
+                        Status NVARCHAR(20) NOT NULL DEFAULT 'inactive',
+                        CurrentPeriodEnd DATETIME2 NULL,
+                        CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                        UpdatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
                     );
                 END");
             app.Logger.LogInformation("Database migration completed successfully");

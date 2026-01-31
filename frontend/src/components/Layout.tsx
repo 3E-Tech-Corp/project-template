@@ -1,13 +1,16 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 
 const navItems = [
   { path: '/', label: '📊 Dashboard' },
+  { path: '/account', label: '👤 Account & Billing' },
   // Add more nav items here as needed
 ];
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const { plan, isActive } = useSubscription();
 
   return (
     <div className="min-h-screen bg-gray-900 flex">
@@ -22,9 +25,9 @@ export default function Layout() {
               key={item.path}
               to={item.path}
               end={item.path === '/'}
-              className={({ isActive }) =>
+              className={({ isActive: active }) =>
                 `block px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
+                  active
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                 }`
@@ -33,12 +36,20 @@ export default function Layout() {
               {item.label}
             </NavLink>
           ))}
+          <a
+            href="/pricing"
+            className="block px-4 py-2.5 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+          >
+            💳 Pricing
+          </a>
         </nav>
         <div className="p-4 border-t border-gray-700">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-white">{user?.username}</p>
-              <p className="text-xs text-gray-400">{user?.role}</p>
+              <p className="text-xs text-gray-400">
+                {user?.role} · {isActive ? plan : 'Free'}
+              </p>
             </div>
             <button
               onClick={logout}
