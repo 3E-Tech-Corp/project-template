@@ -79,7 +79,7 @@ jobs:
           path: artifacts/deployment
 
       - name: Deploy to IIS
-        shell: pwsh
+        shell: powershell
         run: |
           .\artifacts\deployment\deploy-iis.ps1 `
             -SiteName "${{ env.SITE_NAME }}" `

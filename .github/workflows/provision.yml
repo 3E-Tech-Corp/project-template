@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run provisioning script
-        shell: pwsh
+        shell: powershell
         run: |
           .\Deployment\provision-iis.ps1 `
             -SiteName "${{ github.event.inputs.site_name }}" `
@@ -38,7 +38,7 @@ jobs:
             -ProjectName "${{ github.event.inputs.project_name }}"
 
       - name: Build and deploy backend
-        shell: pwsh
+        shell: powershell
         run: |
           $siteName = "${{ github.event.inputs.site_name }}"
           $backendPath = "F:\New_WWW\$siteName\API"
@@ -74,7 +74,7 @@ jobs:
           Write-Host "   Backend deployed" -ForegroundColor Green
 
       - name: Build and deploy frontend
-        shell: pwsh
+        shell: powershell
         run: |
           $siteName = "${{ github.event.inputs.site_name }}"
           $frontendPath = "F:\New_WWW\$siteName\WWW"
@@ -90,7 +90,7 @@ jobs:
           Write-Host "   Frontend deployed" -ForegroundColor Green
 
       - name: Restart App Pool
-        shell: pwsh
+        shell: powershell
         run: |
           Import-Module WebAdministration
           $appPool = "${{ github.event.inputs.site_name }}"
@@ -103,7 +103,7 @@ jobs:
           Write-Host "   App pool restarted" -ForegroundColor Green
 
       - name: Health check
-        shell: pwsh
+        shell: powershell
         run: |
           $domain = "${{ github.event.inputs.domain }}"
           Write-Host ">> Waiting for site to start..." -ForegroundColor Yellow
@@ -138,7 +138,7 @@ jobs:
           }
 
       - name: Output summary
-        shell: pwsh
+        shell: powershell
         run: |
           $siteName = "${{ github.event.inputs.site_name }}"
           $domain = "${{ github.event.inputs.domain }}"
