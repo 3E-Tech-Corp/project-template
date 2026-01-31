@@ -4,7 +4,7 @@
     Called by the provision.yml GitHub Actions workflow.
 
 .DESCRIPTION
-    Idempotent — safe to re-run. Checks if resources exist before creating them.
+    Idempotent - safe to re-run. Checks if resources exist before creating them.
 
 .PARAMETER SiteName
     IIS site name (same as domain, e.g., myapp.3eweb.com)
@@ -44,7 +44,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
+# - Paths -----------------------------------
 $sitePath      = Join-Path $BasePath $SiteName
 $frontendPath  = Join-Path $sitePath "WWW"
 $backendPath   = Join-Path $sitePath "API"
@@ -66,7 +66,7 @@ Write-Host "==========================================================" -Foregro
 
 $summary = @()
 
-# ── 1. Create Directories ─────────────────────────────────────────────────────
+# - 1. Create Directories ---------------------------
 Write-Host "`n>> Creating directories..." -ForegroundColor Yellow
 
 foreach ($dir in @($frontendPath, $backendPath, $logsPath, $backupPath)) {
@@ -79,7 +79,7 @@ foreach ($dir in @($frontendPath, $backendPath, $logsPath, $backupPath)) {
     }
 }
 
-# ── 2. Create SQL Server Database ─────────────────────────────────────────────
+# - 2. Create SQL Server Database -----------------------
 Write-Host "`n>> Creating database: $DatabaseName ..." -ForegroundColor Yellow
 
 $sqlCheck = @"
@@ -110,7 +110,7 @@ try {
     throw
 }
 
-# ── 3. Generate appsettings.Production.json ────────────────────────────────────
+# - 3. Generate appsettings.Production.json ------------------
 Write-Host "`n>> Generating appsettings.Production.json ..." -ForegroundColor Yellow
 
 $appsettingsPath = Join-Path $backendPath "appsettings.Production.json"
@@ -151,10 +151,10 @@ if (!(Test-Path $appsettingsPath)) {
     Write-Host "   Exists:  $appsettingsPath (not overwritten)" -ForegroundColor Gray
 }
 
-# ── 4. Import IIS Module ──────────────────────────────────────────────────────
+# - 4. Import IIS Module ---------------------------
 Import-Module WebAdministration -ErrorAction Stop
 
-# ── 5. Create App Pool ────────────────────────────────────────────────────────
+# - 5. Create App Pool ----------------------------
 Write-Host "`n>> Creating App Pool: $appPoolName ..." -ForegroundColor Yellow
 
 if (!(Test-Path "IIS:\AppPools\$appPoolName")) {
@@ -172,7 +172,7 @@ if (!(Test-Path "IIS:\AppPools\$appPoolName")) {
     Set-ItemProperty "IIS:\AppPools\$appPoolName" -Name managedPipelineMode -Value "Integrated"
 }
 
-# ── 6. Create IIS Site ────────────────────────────────────────────────────────
+# - 6. Create IIS Site ----------------------------
 Write-Host "`n>> Creating IIS Site: $SiteName ..." -ForegroundColor Yellow
 
 if (!(Get-Website -Name $SiteName -ErrorAction SilentlyContinue)) {
@@ -182,13 +182,13 @@ if (!(Get-Website -Name $SiteName -ErrorAction SilentlyContinue)) {
                 -HostHeader $Domain `
                 -Port 80 `
                 -Force | Out-Null
-    Write-Host "   Site created: $SiteName → $frontendPath (port 80, host: $Domain)" -ForegroundColor Green
+    Write-Host "   Site created: $SiteName -> $frontendPath (port 80, host: $Domain)" -ForegroundColor Green
     $summary += "Created IIS site: $SiteName"
 } else {
     Write-Host "   Site exists: $SiteName" -ForegroundColor Gray
 }
 
-# ── 7. Add HTTPS binding if wildcard cert is available ─────────────────────────
+# - 7. Add HTTPS binding if wildcard cert is available -------------
 Write-Host "`n>> Checking for SSL certificate..." -ForegroundColor Yellow
 
 $certDomain = "*.3eweb.com"
@@ -211,11 +211,11 @@ if ($cert) {
         Write-Host "   HTTPS binding already exists" -ForegroundColor Gray
     }
 } else {
-    Write-Host "   No wildcard cert found for $certDomain — HTTP only" -ForegroundColor Yellow
-    $summary += "No SSL cert found — HTTP only (add manually later)"
+    Write-Host "   No wildcard cert found for $certDomain - HTTP only" -ForegroundColor Yellow
+    $summary += "No SSL cert found - HTTP only (add manually later)"
 }
 
-# ── 8. Create /api Virtual Application ────────────────────────────────────────
+# - 8. Create /api Virtual Application --------------------
 Write-Host "`n>> Creating /api virtual application..." -ForegroundColor Yellow
 
 $existingApp = Get-WebApplication -Site $SiteName -Name "api" -ErrorAction SilentlyContinue
@@ -224,19 +224,19 @@ if (!$existingApp) {
                        -Name "api" `
                        -PhysicalPath $backendPath `
                        -ApplicationPool $appPoolName | Out-Null
-    Write-Host "   Virtual app created: /$SiteName/api → $backendPath" -ForegroundColor Green
+    Write-Host "   Virtual app created: /$SiteName/api -> $backendPath" -ForegroundColor Green
     $summary += "Created virtual application: /api"
 } else {
     Write-Host "   Virtual app /api already exists" -ForegroundColor Gray
 }
 
-# ── 9. Set Folder Permissions ─────────────────────────────────────────────────
+# - 9. Set Folder Permissions -------------------------
 Write-Host "`n>> Setting folder permissions..." -ForegroundColor Yellow
 
 $appPoolIdentity = "IIS AppPool\$appPoolName"
 
 try {
-    # IIS_IUSRS — read/execute on both frontend and backend
+    # IIS_IUSRS - read/execute on both frontend and backend
     $acl = Get-Acl $frontendPath
     $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
         "IIS_IUSRS", "ReadAndExecute", "ContainerInherit,ObjectInherit", "None", "Allow"
@@ -251,7 +251,7 @@ try {
     $acl.SetAccessRule($rule)
     Set-Acl -Path $backendPath -AclObject $acl
 
-    # App pool identity — write to API/logs
+    # App pool identity - write to API/logs
     $acl = Get-Acl $logsPath
     $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
         $appPoolIdentity, "Modify", "ContainerInherit,ObjectInherit", "None", "Allow"
@@ -259,7 +259,7 @@ try {
     $acl.SetAccessRule($rule)
     Set-Acl -Path $logsPath -AclObject $acl
 
-    # App pool identity — read on API folder (for appsettings, etc.)
+    # App pool identity - read on API folder (for appsettings, etc.)
     $acl = Get-Acl $backendPath
     $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
         $appPoolIdentity, "ReadAndExecute", "ContainerInherit,ObjectInherit", "None", "Allow"
@@ -270,11 +270,11 @@ try {
     Write-Host "   Permissions set for IIS_IUSRS and $appPoolIdentity" -ForegroundColor Green
     $summary += "Set folder permissions"
 } catch {
-    Write-Host "   Warning: Error setting permissions — $_" -ForegroundColor Yellow
+    Write-Host "   Warning: Error setting permissions - $_" -ForegroundColor Yellow
     $summary += "WARNING: Permission setting had errors"
 }
 
-# ── 10. Start App Pool ────────────────────────────────────────────────────────
+# - 10. Start App Pool ----------------------------
 Write-Host "`n>> Starting App Pool..." -ForegroundColor Yellow
 
 try {
@@ -286,10 +286,10 @@ try {
         Write-Host "   App pool already running" -ForegroundColor Gray
     }
 } catch {
-    Write-Host "   Warning: Could not start app pool — $_" -ForegroundColor Yellow
+    Write-Host "   Warning: Could not start app pool - $_" -ForegroundColor Yellow
 }
 
-# ── 11. Create default index.html placeholder ─────────────────────────────────
+# - 11. Create default index.html placeholder -----------------
 $indexPath = Join-Path $frontendPath "index.html"
 if (!(Test-Path $indexPath)) {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
@@ -298,29 +298,27 @@ if (!(Test-Path $indexPath)) {
     Write-Host "`n>> Created placeholder index.html" -ForegroundColor Green
 }
 
-# ── Summary ────────────────────────────────────────────────────────────────────
-Write-Host "`n==========================================================" -ForegroundColor Cyan
-Write-Host " Provisioning Complete!" -ForegroundColor Green
-Write-Host "==========================================================" -ForegroundColor Cyan
+# - Summary -
 Write-Host ""
-Write-Host " Site Name:    $SiteName"
-Write-Host " Domain:       $Domain"
-Write-Host " App Pool:     $appPoolName"
-Write-Host " Database:     $DatabaseName"
-Write-Host " Frontend:     $frontendPath"
-Write-Host " Backend:      $backendPath"
-Write-Host " Backups:      $backupPath"
+Write-Host "========== Provisioning Complete! ==========" -ForegroundColor Green
+Write-Host "Site Name:    $SiteName"
+Write-Host "Domain:       $Domain"
+Write-Host "App Pool:     $appPoolName"
+Write-Host "Database:     $DatabaseName"
+Write-Host "Frontend:     $frontendPath"
+Write-Host "Backend:      $backendPath"
+Write-Host "Backups:      $backupPath"
 Write-Host ""
-Write-Host " Actions taken:" -ForegroundColor Yellow
+Write-Host "Actions taken:" -ForegroundColor Yellow
 foreach ($item in $summary) {
-    Write-Host "   ✓ $item" -ForegroundColor Green
+    Write-Host "  - $item" -ForegroundColor Green
 }
 Write-Host ""
-Write-Host " URLs:" -ForegroundColor Yellow
-Write-Host "   http://$Domain"
-Write-Host "   http://$Domain/api/health"
+Write-Host "URLs:" -ForegroundColor Yellow
+Write-Host "  http://$Domain"
+Write-Host "  http://$Domain/api/health"
 if ($cert) {
-    Write-Host "   https://$Domain"
-    Write-Host "   https://$Domain/api/health"
+    Write-Host "  https://$Domain"
+    Write-Host "  https://$Domain/api/health"
 }
-Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Green
