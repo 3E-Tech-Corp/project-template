@@ -1,4 +1,3 @@
-#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     Provisions a new IIS site, app pool, SQL Server database, and configuration.
@@ -293,17 +292,9 @@ try {
 # ── 11. Create default index.html placeholder ─────────────────────────────────
 $indexPath = Join-Path $frontendPath "index.html"
 if (!(Test-Path $indexPath)) {
-    @"
-<!DOCTYPE html>
-<html>
-<head><title>$ProjectName</title></head>
-<body>
-    <h1>$ProjectName</h1>
-    <p>Site provisioned successfully. Awaiting first deployment.</p>
-    <p><small>$(Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC")</small></p>
-</body>
-</html>
-"@ | Set-Content -Path $indexPath -Encoding UTF8
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
+    $indexHtml = "<!DOCTYPE html><html><head><title>$ProjectName</title></head><body><h1>$ProjectName</h1><p>Site provisioned successfully. Awaiting first deployment.</p><p><small>$timestamp</small></p></body></html>"
+    Set-Content -Path $indexPath -Value $indexHtml -Encoding UTF8
     Write-Host "`n>> Created placeholder index.html" -ForegroundColor Green
 }
 
