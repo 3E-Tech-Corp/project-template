@@ -79,35 +79,59 @@ foreach ($dir in @($frontendPath, $backendPath, $logsPath, $backupPath)) {
     }
 }
 
-# - 2. Create SQL Server Database -----------------------
-Write-Host "`n>> Creating database: $DatabaseName ..." -ForegroundColor Yellow
+# - 2. Create Database + Grant IIS App Pool access -----------------------
+Write-Host "`n>> Setting up database and permissions..." -ForegroundColor Yellow
 
-$sqlCheck = @"
+$appPoolLogin = "IIS APPPOOL\$SiteName"
+
+# Single SQL file with GO separators for proper batch execution
+$sqlSetup = @"
+-- Batch 1: Create database
 IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'$DatabaseName')
 BEGIN
     CREATE DATABASE [$DatabaseName];
     PRINT 'DATABASE_CREATED';
 END
 ELSE
-BEGIN
     PRINT 'DATABASE_EXISTS';
-END
+GO
+
+-- Batch 2: Wait for DB to come online
+WAITFOR DELAY '00:00:03';
+PRINT 'WAITED';
+GO
+
+-- Batch 3: Create login
+IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = N'$appPoolLogin')
+    CREATE LOGIN [$appPoolLogin] FROM WINDOWS;
+PRINT 'LOGIN_OK';
+GO
+
+-- Batch 4: Create user and grant roles
+USE [$DatabaseName];
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = N'$appPoolLogin')
+    CREATE USER [$appPoolLogin] FOR LOGIN [$appPoolLogin];
+ALTER ROLE db_datareader ADD MEMBER [$appPoolLogin];
+ALTER ROLE db_datawriter ADD MEMBER [$appPoolLogin];
+ALTER ROLE db_ddladmin ADD MEMBER [$appPoolLogin];
+PRINT 'ACCESS_GRANTED';
+GO
 "@
 
+$sqlFile = Join-Path $env:TEMP "db-setup-$(Get-Random).sql"
+$sqlSetup | Set-Content -Path $sqlFile -Encoding UTF8
+
 try {
-    $result = sqlcmd -S $SqlServerInstance -Q $sqlCheck -h -1 -W 2>&1
+    $result = sqlcmd -S $SqlServerInstance -i $sqlFile -h -1 -W 2>&1
     $resultText = ($result | Out-String).Trim()
-    if ($resultText -match "DATABASE_CREATED") {
-        Write-Host "   Database created: $DatabaseName" -ForegroundColor Green
-        $summary += "Created database: $DatabaseName"
-    } elseif ($resultText -match "DATABASE_EXISTS") {
-        Write-Host "   Database already exists: $DatabaseName" -ForegroundColor Gray
-    } else {
-        Write-Host "   sqlcmd output: $resultText" -ForegroundColor Yellow
-    }
+    Write-Host "   $resultText" -ForegroundColor Green
+    $summary += "Database setup complete"
+    $summary += "Granted DB access to $appPoolLogin"
 } catch {
-    Write-Host "   ERROR creating database: $_" -ForegroundColor Red
+    Write-Host "   ERROR in database setup: $_" -ForegroundColor Red
     throw
+} finally {
+    Remove-Item $sqlFile -ErrorAction SilentlyContinue
 }
 
 # - 3. Generate appsettings.Production.json ------------------
@@ -148,7 +172,16 @@ if (!(Test-Path $appsettingsPath)) {
     Write-Host "   Created: $appsettingsPath" -ForegroundColor Green
     $summary += "Created appsettings.Production.json"
 } else {
-    Write-Host "   Exists:  $appsettingsPath (not overwritten)" -ForegroundColor Gray
+    Write-Host "   Exists:  $appsettingsPath" -ForegroundColor Gray
+    # Ensure connection string uses Trusted_Connection (fix from prior SQL auth attempt)
+    $existing = Get-Content $appsettingsPath -Raw | ConvertFrom-Json
+    $expectedConnStr = "Server=$SqlServerInstance;Database=$DatabaseName;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+    if ($existing.ConnectionStrings.DefaultConnection -ne $expectedConnStr) {
+        $existing.ConnectionStrings.DefaultConnection = $expectedConnStr
+        $existing | ConvertTo-Json -Depth 5 | Set-Content -Path $appsettingsPath -Encoding UTF8
+        Write-Host "   Updated connection string to Trusted_Connection" -ForegroundColor Green
+        $summary += "Updated connection string"
+    }
 }
 
 # - 4. Import IIS Module ---------------------------
@@ -188,15 +221,53 @@ if (!(Get-Website -Name $SiteName -ErrorAction SilentlyContinue)) {
     Write-Host "   Site exists: $SiteName" -ForegroundColor Gray
 }
 
-# - 7. Add HTTPS binding if wildcard cert is available -------------
+# - 7. Add HTTPS binding if SSL cert is available -------------
 Write-Host "`n>> Checking for SSL certificate..." -ForegroundColor Yellow
 
-$certDomain = "*.3eweb.com"
-$cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object {
-    $_.Subject -match [regex]::Escape($certDomain) -or
-    ($_.Extensions | Where-Object { $_.Oid.FriendlyName -eq "Subject Alternative Name" } |
-     ForEach-Object { $_.Format($false) }) -match [regex]::Escape($certDomain)
-} | Sort-Object NotAfter -Descending | Select-Object -First 1
+# Extract the parent domain for wildcard cert matching (e.g., games.synthia.bot -> *.synthia.bot)
+$domainParts = $Domain.Split('.')
+$cert = $null
+
+if ($domainParts.Length -ge 2) {
+    # Build list of wildcard patterns to search for
+    $wildcardPatterns = @()
+
+    # *.parentdomain (e.g., *.synthia.bot, *.3eweb.com)
+    if ($domainParts.Length -ge 3) {
+        $parentDomain = ($domainParts | Select-Object -Skip 1) -join '.'
+        $wildcardPatterns += "*.$parentDomain"
+    }
+    # Also check *.topleveldomain for 4+ part domains (e.g., *.bot)
+    $wildcardPatterns += "*.3eweb.com"  # Legacy fallback
+
+    Write-Host "   Searching for certs matching: $($wildcardPatterns -join ', ')" -ForegroundColor Gray
+
+    foreach ($pattern in $wildcardPatterns) {
+        $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object {
+            $_.Subject -match [regex]::Escape($pattern) -or
+            ($_.Extensions | Where-Object { $_.Oid.FriendlyName -eq "Subject Alternative Name" } |
+             ForEach-Object { $_.Format($false) }) -match [regex]::Escape($pattern)
+        } | Sort-Object NotAfter -Descending | Select-Object -First 1
+
+        if ($cert) {
+            Write-Host "   Found cert for $pattern : $($cert.Thumbprint.Substring(0,8))... (expires $($cert.NotAfter.ToString('yyyy-MM-dd')))" -ForegroundColor Green
+            break
+        }
+    }
+
+    # Fallback: look for Cloudflare origin cert or any cert that covers this domain
+    if (!$cert) {
+        $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object {
+            $san = ($_.Extensions | Where-Object { $_.Oid.FriendlyName -eq "Subject Alternative Name" } |
+                    ForEach-Object { $_.Format($false) })
+            ($san -match [regex]::Escape($Domain)) -or ($_.Subject -match [regex]::Escape($Domain))
+        } | Sort-Object NotAfter -Descending | Select-Object -First 1
+
+        if ($cert) {
+            Write-Host "   Found exact-match cert: $($cert.Thumbprint.Substring(0,8))..." -ForegroundColor Green
+        }
+    }
+}
 
 if ($cert) {
     $existingHttps = Get-WebBinding -Name $SiteName -Protocol "https" -ErrorAction SilentlyContinue
@@ -206,12 +277,13 @@ if ($cert) {
         $binding = Get-WebBinding -Name $SiteName -Protocol "https" -Port 443
         $binding.AddSslCertificate($cert.Thumbprint, "My")
         Write-Host "   HTTPS binding added with cert: $($cert.Thumbprint.Substring(0,8))..." -ForegroundColor Green
-        $summary += "Added HTTPS binding with wildcard cert"
+        $summary += "Added HTTPS binding with SSL cert"
     } else {
         Write-Host "   HTTPS binding already exists" -ForegroundColor Gray
     }
 } else {
-    Write-Host "   No wildcard cert found for $certDomain - HTTP only" -ForegroundColor Yellow
+    Write-Host "   No matching SSL cert found - HTTP only" -ForegroundColor Yellow
+    Write-Host "   Searched for wildcards and exact match for: $Domain" -ForegroundColor Yellow
     $summary += "No SSL cert found - HTTP only (add manually later)"
 }
 
